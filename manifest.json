@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "AutoSchema API Collector",
+  "version": "0.1.0",
+  "description": "Capture website API traffic, infer request/response schemas, group by domain, and export for AI learning and Chrome MCP automation.",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "storage",
+    "downloads",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "AutoSchema API Collector"
+  },
+  "side_panel": {
+    "default_path": "options.html"
+  }
+}

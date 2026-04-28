@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AutoSchema 导出</title>
+    <style>
+      :root {
+        --bg1: #f8fafc;
+        --bg2: #e2e8f0;
+        --card: #ffffff;
+        --ink: #0f172a;
+        --muted: #475569;
+        --line: #cbd5e1;
+        --accent: #0ea5e9;
+        --accent-2: #0284c7;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: "Avenir Next", "PingFang SC", sans-serif;
+        background:
+          radial-gradient(circle at 5% 0%, rgba(14, 165, 233, 0.12), transparent 35%),
+          radial-gradient(circle at 95% 20%, rgba(2, 132, 199, 0.12), transparent 30%),
+          linear-gradient(180deg, var(--bg1), var(--bg2));
+        min-height: 100vh;
+        overflow: hidden;
+      }
+      .wrap {
+        max-width: none;
+        margin: 0;
+        padding: 14px 12px 18px;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .head {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: 28px;
+        letter-spacing: 0.2px;
+      }
+      .muted { color: var(--muted); }
+      .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .primary { background: var(--accent); color: white; }
+      .primary:hover { background: var(--accent-2); }
+      .ghost {
+        border: 1px solid var(--line);
+        background: white;
+      }
+      .grid {
+        margin-top: 12px;
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 14px;
+        flex: 1;
+        min-height: 0;
+      }
+      .config-panel {
+        margin-top: 10px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 10px;
+      }
+      .config-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .toggle-icons {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .icon-toggle {
+        min-height: 34px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: #ffffff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        padding: 6px 10px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #0f172a;
+      }
+      .icon-toggle.active {
+        background: #e0f2fe;
+        border-color: var(--accent);
+        color: var(--accent-2);
+      }
+      .host-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        padding: 6px 10px;
+        font-size: 12px;
+        background: #f8fafc;
+      }
+      .host-chip strong {
+        display: inline-block;
+        max-width: 190px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .panel {
+        grid-column: span 12;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+        height: 100%;
+        max-height: none;
+        overflow: auto;
+        min-height: 0;
+      }
+      .list-tools {
+        margin-top: 12px;
+        padding: 10px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+      }
+      .search-input {
+        width: 100%;
+        height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        padding: 0 10px;
+        font-size: 14px;
+        color: var(--ink);
+        background: #ffffff;
+      }
+      .search-input:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+      }
+      .api-item {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 8px;
+      }
+      .api-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .api-main {
+        min-width: 0;
+      }
+      .api-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .api-actions button {
+        padding: 6px 10px;
+        border-radius: 8px;
+      }
+      .schema-pane {
+        margin-top: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0f172a;
+        overflow: hidden;
+      }
+      .tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 12px;
+        background: #e2e8f0;
+      }
+      pre {
+        margin: 0;
+        padding: 10px;
+        background: #0f172a;
+        color: #e2e8f0;
+        overflow: auto;
+        max-height: 180px;
+        font-size: 12px;
+      }
+      @media (max-width: 900px) {
+        .panel { grid-column: span 12; max-height: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <h1>AutoSchema 导出面板</h1>
+          <div class="muted" id="summary">加载中...</div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="exportSelectedJson">导出当前 Host JSON</button>
+          <button class="ghost" id="exportSelectedMcp">导出当前 Host MCP</button>
+          <button class="ghost" id="refresh">刷新</button>
+        </div>
+      </div>
+
+      <section class="config-panel">
+        <div class="config-row">
+          <div class="toggle-icons">
+            <button class="icon-toggle" id="toggleEnabled" title="启用采集" aria-label="启用采集">
+              启用采集
+            </button>
+            <button class="icon-toggle" id="toggleXhrFetch" title="仅采集 XHR / fetch" aria-label="仅采集 XHR / fetch">
+              仅采集 XHR/fetch
+            </button>
+            <button class="icon-toggle" id="toggleIgnoreStatic" title="过滤静态资源请求" aria-label="过滤静态资源请求">
+              过滤静态资源
+            </button>
+          </div>
+          <div class="host-chip">当前页面: <strong id="currentHost">-</strong></div>
+        </div>
+      </section>
+
+      <div class="list-tools">
+        <input
+          class="search-input"
+          id="apiSearch"
+          type="search"
+          placeholder="搜索 API（支持 method / path / 状态码）"
+          aria-label="搜索 API"
+        />
+      </div>
+
+      <div class="grid">
+        <section class="panel">
+          <div id="apiList"></div>
+        </section>
+      </div>
+    </div>
+
+    <script src="options.js" type="module"></script>
+  </body>
+</html>
