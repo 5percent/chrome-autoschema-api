@@ -147,6 +147,7 @@ function renderApiList() {
           <div><span class="tag">${item.method}</span> <strong>${item.pathTemplate}</strong></div>
           <div class="api-actions">
             <button class="ghost toggle-schema" data-api-key="${apiKey}">${expanded ? "收起 Schema" : "查看 Schema"}</button>
+            <button class="ghost export-api" data-api-key="${apiKey}">导出单条</button>
           </div>
         </div>
         <div class="muted">采集次数: ${item.count} | 最近: ${new Date(item.lastSeen).toLocaleString()}</div>
@@ -169,6 +170,46 @@ function renderApiList() {
       renderApiList();
     });
   });
+
+  apiListEl.querySelectorAll(".export-api").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const apiKey = btn.getAttribute("data-api-key");
+      if (!apiKey || !activeDomain) return;
+
+      const api = latestData?.domains?.[activeDomain]?.apis?.[apiKey];
+      if (!api) {
+        alert("当前 API 数据不存在");
+        return;
+      }
+
+      makeDownload(
+        `autoschema-${activeDomain}-${api.method}-${Date.now()}.json`,
+        buildSingleApiPayload(activeDomain, apiKey, api),
+      );
+    });
+  });
+}
+
+function buildSingleApiPayload(domain, apiKey, api) {
+  return {
+    version: latestData?.version,
+    updatedAt: latestData?.updatedAt,
+    domain,
+    apiKey,
+    api: {
+      method: api.method,
+      path: api.path,
+      pathTemplate: api.pathTemplate,
+      requestSchema: api.requestSchema,
+      responseSchema: api.responseSchema,
+      sampleRequests: api.sampleRequests || [],
+      sampleResponses: api.sampleResponses || [],
+      statuses: api.statuses || {},
+      count: api.count || 0,
+      firstSeen: api.firstSeen,
+      lastSeen: api.lastSeen,
+    },
+  };
 }
 
 function buildCurrentDomainMcpPayload(domain, domainBucket) {

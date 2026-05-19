@@ -12,7 +12,7 @@ import {
   getConfig,
   getData,
   saveConfig,
-  saveData,
+  updateData,
 } from "./storage.js";
 
 const DEBUGGER_VERSION = "1.3";
@@ -82,6 +82,29 @@ async function shouldCaptureRequest(urlString, resourceType) {
   const whitelist = normalizeDomainList(config.whitelistDomains);
 
   // Whitelist-only mode: empty whitelist means capture nothing.
+  if (whitelist.length === 0) {
+    return false;
+  }
+  if (!matchDomain(domain, whitelist)) {
+    return false;
+  }
+
+  return true;
+}
+
+async function shouldStoreRequestMeta(urlString) {
+  if (!shouldTrackUrl(urlString)) return false;
+
+  const config = {
+    ...defaultConfig,
+    ...(await getConfig()),
+  };
+
+  if (!config.enabled) return false;
+
+  const domain = toDomain(urlString);
+  const whitelist = normalizeDomainList(config.whitelistDomains);
+
   if (whitelist.length === 0) {
     return false;
   }
@@ -192,69 +215,86 @@ function parsePostData(postData) {
   return { raw: String(postData).slice(0, 2000) };
 }
 
+function getRequestMapKey(tabId, requestId) {
+  return `${tabId}:${requestId}`;
+}
+
+async function shouldPersistCapturedRequest(meta) {
+  return shouldCaptureRequest(meta?.url, meta?.resourceType);
+}
+
 async function upsertApiRecord(meta, responsePayload) {
   if (!meta || !shouldTrackUrl(meta.url)) return;
 
-  const data = await getData();
-  const url = new URL(meta.url);
-  const domain = toDomain(meta.url);
-  const path = url.pathname || "/";
-  const pathTemplate = buildApiKey(meta.method, meta.url).replace(
-    `${meta.method.toUpperCase()} `,
-    "",
-  );
-  const apiKey = `${meta.method.toUpperCase()} ${pathTemplate}`;
+  await updateData(async (data) => {
+    const url = new URL(meta.url);
+    const domain = toDomain(meta.url);
+    const path = url.pathname || "/";
+    const pathTemplate = buildApiKey(meta.method, meta.url).replace(
+      `${meta.method.toUpperCase()} `,
+      "",
+    );
+    const apiKey = `${meta.method.toUpperCase()} ${pathTemplate}`;
 
-  if (!data.domains[domain]) {
-    data.domains[domain] = {
-      domain,
-      capturedAt: new Date().toISOString(),
-      apis: {},
-    };
-  }
+    if (!data.domains[domain]) {
+      data.domains[domain] = {
+        domain,
+        capturedAt: new Date().toISOString(),
+        apis: {},
+      };
+    }
 
-  const bucket = getOrCreateApiBucket(
-    data.domains[domain],
-    apiKey,
-    meta.method.toUpperCase(),
-    path,
-    pathTemplate,
-  );
-  bucket.count += 1;
-  bucket.lastSeen = new Date().toISOString();
-  bucket.statuses[String(meta.status || responsePayload?.status || "unknown")] =
-    (bucket.statuses[
+    const bucket = getOrCreateApiBucket(
+      data.domains[domain],
+      apiKey,
+      meta.method.toUpperCase(),
+      path,
+      pathTemplate,
+    );
+    bucket.count += 1;
+    bucket.lastSeen = new Date().toISOString();
+    bucket.statuses[
       String(meta.status || responsePayload?.status || "unknown")
-    ] || 0) + 1;
+    ] =
+      (bucket.statuses[
+        String(meta.status || responsePayload?.status || "unknown")
+      ] || 0) + 1;
 
-  const requestBody = parsePostData(meta.postData);
-  if (requestBody !== undefined) {
-    bucket.sampleRequests = addSample(bucket.sampleRequests, requestBody);
-    bucket.requestSchema = mergeSchema(
-      bucket.requestSchema,
-      inferSchema(requestBody),
-    );
-  }
+    const requestBody = parsePostData(meta.postData);
+    if (requestBody !== undefined) {
+      bucket.sampleRequests = addSample(bucket.sampleRequests, requestBody);
+      bucket.requestSchema = mergeSchema(
+        bucket.requestSchema,
+        inferSchema(requestBody),
+      );
+    }
 
-  const responseBody = responsePayload?.body;
-  if (responseBody !== undefined) {
-    const parsed = tryJsonParse(responseBody);
-    const schemaSource = parsed.ok
-      ? parsed.data
-      : { raw: String(responseBody).slice(0, 2000) };
-    bucket.sampleResponses = addSample(bucket.sampleResponses, schemaSource);
-    bucket.responseSchema = mergeSchema(
-      bucket.responseSchema,
-      inferSchema(schemaSource),
-    );
-  }
+    const responseBody = responsePayload?.body;
+    if (responseBody !== undefined) {
+      const parsed = tryJsonParse(responseBody);
+      const schemaSource = parsed.ok
+        ? parsed.data
+        : { raw: String(responseBody).slice(0, 2000) };
+      bucket.sampleResponses = addSample(bucket.sampleResponses, schemaSource);
+      bucket.responseSchema = mergeSchema(
+        bucket.responseSchema,
+        inferSchema(schemaSource),
+      );
+    }
 
-  await saveData(data);
+    return data;
+  });
 }
 
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status !== "complete") return;
-  if (!shouldTrackUrl(tab.url)) return;
+  const nextUrl = changeInfo.url || tab.url;
+  const shouldAttach =
+    changeInfo.status === "loading" ||
+    changeInfo.status === "complete" ||
+    !!changeInfo.url;
+
+  if (!shouldAttach) return;
+  if (!shouldTrackUrl(nextUrl)) return;
   await ensureTabAttached(tabId);
   await trimTrackedTabs();
 });
@@ -278,14 +318,15 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.debugger.onEvent.addListener(async (source, method, params) => {
   const tabId = source.tabId;
   if (!tabId || !attachedTabs.has(tabId)) return;
+  const requestKey = getRequestMapKey(tabId, params.requestId);
 
   if (method === "Network.requestWillBeSent") {
     const request = params.request || {};
     const resourceType = params.type || "Other";
-    const capture = await shouldCaptureRequest(request.url, resourceType);
+    const capture = await shouldStoreRequestMeta(request.url);
     if (!capture) return;
 
-    requestMetaById.set(params.requestId, {
+    requestMetaById.set(requestKey, {
       tabId,
       url: request.url,
       method: request.method || "GET",
@@ -296,14 +337,20 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
   }
 
   if (method === "Network.responseReceived") {
-    const meta = requestMetaById.get(params.requestId);
+    const meta = requestMetaById.get(requestKey);
     if (!meta) return;
     meta.status = params.response?.status;
+    meta.resourceType = params.type || meta.resourceType;
   }
 
   if (method === "Network.loadingFinished") {
-    const meta = requestMetaById.get(params.requestId);
+    const meta = requestMetaById.get(requestKey);
     if (!meta) return;
+
+    if (!(await shouldPersistCapturedRequest(meta))) {
+      requestMetaById.delete(requestKey);
+      return;
+    }
 
     let responseBody;
     try {
@@ -323,11 +370,23 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
     }
 
     await upsertApiRecord(meta, { body: responseBody });
-    requestMetaById.delete(params.requestId);
+    requestMetaById.delete(requestKey);
   }
 
   if (method === "Network.loadingFailed") {
-    requestMetaById.delete(params.requestId);
+    const meta = requestMetaById.get(requestKey);
+    if (!meta) return;
+
+    meta.status = params.errorText || meta.status || "failed";
+    meta.resourceType = params.type || meta.resourceType;
+
+    if (await shouldPersistCapturedRequest(meta)) {
+      await upsertApiRecord(meta, {
+        status: params.errorText || "failed",
+      });
+    }
+
+    requestMetaById.delete(requestKey);
   }
 });
 
